@@ -2,7 +2,6 @@ version: '3.9'
 
 services:
 
-  # ── MySQL ──────────────────────────────────────────────────────
   mysql:
     image: mysql:8.0
     container_name: paintco_mysql
@@ -26,7 +25,6 @@ services:
     networks:
       - paintco_net
 
-  # ── NestJS Backend ─────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -52,7 +50,6 @@ services:
     networks:
       - paintco_net
 
-  # ── Angular Frontend ───────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -64,7 +61,6 @@ services:
     networks:
       - paintco_net
 
-  # ── Nginx Reverse Proxy (HTTP trước khi có cert) ───────────────
   nginx:
     image: nginx:1.25-alpine
     container_name: paintco_nginx
@@ -73,13 +69,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Config: lần đầu dùng http.conf, sau khi có cert dùng https.conf
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      # Certbot webroot để xác thực domain
       - certbot_www:/var/www/certbot:ro
-      # SSL certs (Certbot ghi vào đây)
       - certbot_certs:/etc/letsencrypt:ro
-      # Log
       - nginx_logs:/var/log/nginx
     depends_on:
       - backend
@@ -87,7 +79,21 @@ services:
     networks:
       - paintco_net
 
-  # ── Certbot (tự động lấy và gia hạn SSL) ──────────────────────
+  # 👉 chạy 1 lần để tạo SSL
+  init-cert:
+    image: certbot/certbot:latest
+    container_name: paintco_init_cert
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+      - ./init-letsencrypt.sh:/init-letsencrypt.sh
+    entrypoint: "/bin/sh /init-letsencrypt.sh"
+    depends_on:
+      - nginx
+    networks:
+      - paintco_net
+
+  # 👉 auto renew SSL
   certbot:
     image: certbot/certbot:latest
     container_name: paintco_certbot
@@ -95,8 +101,13 @@ services:
     volumes:
       - certbot_www:/var/www/certbot:rw
       - certbot_certs:/etc/letsencrypt:rw
-    # Kiểm tra gia hạn mỗi 12 tiếng, cert hết hạn trong 30 ngày thì gia hạn
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'"
+    entrypoint: >
+      /bin/sh -c "
+      trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot;
+        sleep 12h & wait $${!};
+      done"
     networks:
       - paintco_net
 
