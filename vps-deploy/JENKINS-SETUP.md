@@ -11,7 +11,7 @@ git init
 git add .
 git commit -m "init"
 git branch -M develop
-git remote add origin https://github.com/duykhanhdeveloper93/WebPainIO.git
+git remote add origin https://github.com/duykhanhdeveloper93/WebPainIOVer2.git
 git push -u origin develop
 ```
 
@@ -61,7 +61,7 @@ Mở: **http://103.77.243.178:8080** → setup như bình thường
 **Pipeline:**
 - Definition: Pipeline script from SCM
 - SCM: Git
-- URL: `https://github.com/duykhanhdeveloper93/WebPainIO.git`
+- URL: `https://github.com/duykhanhdeveloper93/WebPainIOVer2.git`
 - Branch: `*/develop`
 - Script Path: `Jenkinsfile`
 

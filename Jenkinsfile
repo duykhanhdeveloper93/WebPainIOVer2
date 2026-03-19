@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         APP_DIR    = '/opt/paintco'
-        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIO.git'
+        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git'
         GIT_BRANCH = 'develop'
         DOMAIN     = 'nuocngavidai.duckdns.org'
     }

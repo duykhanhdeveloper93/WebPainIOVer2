@@ -14,7 +14,7 @@ echo ""
 if [ ! -d "${APP_DIR}/.git" ]; then
   echo "Clone code tu GitHub..."
   git clone -b develop \
-    https://github.com/duykhanhdeveloper93/WebPainIO.git \
+    https://github.com/duykhanhdeveloper93/WebPainIOVer2.git \
     ${APP_DIR}
   echo "Clone OK"
 fi
