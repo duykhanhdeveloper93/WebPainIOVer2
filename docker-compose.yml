@@ -1,0 +1,112 @@
+version: '3.9'
+
+services:
+
+  # ── MySQL ──────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: paintco_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass2024}
+      MYSQL_DATABASE: ${DB_DATABASE:-paintco_db}
+      MYSQL_USER: ${DB_USERNAME:-paintco}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-paintco123}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "paintco", "--password=${DB_PASSWORD:-paintco123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - paintco_net
+
+  # ── NestJS Backend ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paintco_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:-paintco}
+      DB_PASSWORD: ${DB_PASSWORD:-paintco123}
+      DB_DATABASE: ${DB_DATABASE:-paintco_db}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_EXPIRES: ${JWT_EXPIRES:-7d}
+      FRONTEND_URL: https://nuocngavidai.duckdns.org
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - paintco_net
+
+  # ── Angular Frontend ───────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: paintco_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - paintco_net
+
+  # ── Nginx Reverse Proxy (HTTP trước khi có cert) ───────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: paintco_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Config: lần đầu dùng http.conf, sau khi có cert dùng https.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Certbot webroot để xác thực domain
+      - certbot_www:/var/www/certbot:ro
+      # SSL certs (Certbot ghi vào đây)
+      - certbot_certs:/etc/letsencrypt:ro
+      # Log
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - paintco_net
+
+  # ── Certbot (tự động lấy và gia hạn SSL) ──────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: paintco_certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_www:/var/www/certbot:rw
+      - certbot_certs:/etc/letsencrypt:rw
+    # Kiểm tra gia hạn mỗi 12 tiếng, cert hết hạn trong 30 ngày thì gia hạn
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'"
+    networks:
+      - paintco_net
+
+volumes:
+  mysql_data:
+  uploads_data:
+  certbot_www:
+  certbot_certs:
+  nginx_logs:
+
+networks:
+  paintco_net:
+    driver: bridge
