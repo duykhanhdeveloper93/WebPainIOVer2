@@ -2,36 +2,38 @@ pipeline {
     agent any
 
     environment {
-        APP_DIR    = '/opt/paintco'
-        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git'
-        GIT_BRANCH = 'develop'
-        DOMAIN     = 'nuocngavidai.duckdns.org'
+        APP_DIR    = '/opt/paintco' // thư mục deploy trên server
+        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git' // repo chuẩn
+        GIT_BRANCH = 'develop' // branch cần deploy
+        DOMAIN     = 'nuocngavidai.duckdns.org' // domain để health check
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '5'))
-        timeout(time: 40, unit: 'MINUTES')
-        disableConcurrentBuilds()
-        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '5')) // giữ 5 build gần nhất
+        timeout(time: 40, unit: 'MINUTES') // timeout toàn pipeline
+        disableConcurrentBuilds() // không cho chạy song song
+        timestamps() // log có timestamp
+        skipDefaultCheckout(true) // 🚨 QUAN TRỌNG: tắt checkout tự động của Jenkins
     }
 
     triggers {
-        githubPush()
+        githubPush() // trigger khi push github
     }
 
     stages {
 
-        stage('Pull Code') {
+        stage('Pull Code (Clean Clone)') {
             steps {
                 sh """
-                    if [ -d "${APP_DIR}/.git" ]; then
-                        cd ${APP_DIR}
-                        git fetch origin ${GIT_BRANCH}
-                        git reset --hard origin/${GIT_BRANCH}
-                    else
-                        git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}
-                    fi
-                    cd ${APP_DIR} && git log -1 --oneline
+                    echo ">>> XOA CODE CU"
+                    rm -rf ${APP_DIR}   # 💀 xóa sạch thư mục cũ (tránh dính repo cũ)
+
+                    echo ">>> CLONE REPO MOI"
+                    git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}  # 📥 clone fresh 100%
+
+                    cd ${APP_DIR}
+                    echo ">>> COMMIT HIEN TAI"
+                    git log -1 --oneline  # in commit đang deploy
                 """
             }
         }
@@ -39,10 +41,14 @@ pipeline {
         stage('Check .env') {
             steps {
                 sh """
-                    if [ ! -f "${APP_DIR}/.env.production" ]; then
-                        cp ${APP_DIR}/.env.production.example ${APP_DIR}/.env.production
+                    cd ${APP_DIR}
+
+                    # nếu chưa có file env thì copy từ example
+                    if [ ! -f ".env.production" ]; then
+                        cp .env.production.example .env.production
                         echo "WARN: Tao .env.production tu example - can kiem tra lai!"
                     fi
+
                     echo "ENV: OK"
                 """
             }
@@ -50,10 +56,13 @@ pipeline {
 
         stage('Build Images') {
             parallel {
+
                 stage('Backend') {
                     steps {
                         sh """
                             cd ${APP_DIR}
+
+                            # build image backend
                             docker build \
                               -t paintco-backend:${BUILD_NUMBER} \
                               -t paintco-backend:latest \
@@ -62,10 +71,13 @@ pipeline {
                         """
                     }
                 }
+
                 stage('Frontend') {
                     steps {
                         sh """
                             cd ${APP_DIR}
+
+                            # build image frontend (có nginx trong Dockerfile - OK)
                             docker build \
                               -t paintco-frontend:${BUILD_NUMBER} \
                               -t paintco-frontend:latest \
@@ -74,6 +86,7 @@ pipeline {
                         """
                     }
                 }
+
             }
         }
 
@@ -82,18 +95,14 @@ pipeline {
                 sh """
                     cd ${APP_DIR}
 
-                    # Check https.conf ton tai chua (da co cert chua)
-                    if [ -f "${APP_DIR}/nginx/conf.d/https.conf" ]; then
-                        echo "HTTPS mode"
-                    else
-                        echo "HTTP mode (chua co SSL cert)"
-                    fi
+                    echo ">>> START DOCKER COMPOSE"
 
+                    # chạy docker compose (dùng file trong repo mới clone)
                     docker compose \
-                      --env-file ${APP_DIR}/.env.production \
+                      --env-file .env.production \
                       up -d --build --remove-orphans
 
-                    echo "Containers started"
+                    echo ">>> CONTAINERS STATUS"
                     docker compose ps
                 """
             }
@@ -104,13 +113,16 @@ pipeline {
                 sh """
                     cd ${APP_DIR}
 
-                    if [ ! -f "${APP_DIR}/.seeded" ]; then
+                    # chỉ seed 1 lần
+                    if [ ! -f ".seeded" ]; then
                         echo "Seeding database..."
                         sleep 10
+
                         docker compose \
-                        --env-file ${APP_DIR}/.env.production \
+                        --env-file .env.production \
                         exec -T backend node dist/database/seed.js
-                        touch ${APP_DIR}/.seeded
+
+                        touch .seeded
                         echo "Seed OK"
                     else
                         echo "Da seed roi, bo qua"
@@ -119,25 +131,21 @@ pipeline {
             }
         }
 
-        stage('Reload Nginx') {
-            steps {
-                sh """
-                    docker compose exec -T nginx nginx -s reload 2>/dev/null \
-                      && echo "Nginx reloaded" \
-                      || echo "Nginx chua chay hoac khong can reload"
-                """
-            }
-        }
+        // ❌ ĐÃ XÓA NGINX RELOAD (vì dùng Caddy)
+        // tránh lỗi container nginx không tồn tại
 
         stage('Health Check') {
             steps {
                 script {
                     sleep(10)
+
                     def status = sh(
-                        script: "curl -sk -o /dev/null -w '%{http_code}' https://${DOMAIN}/api/v1/products 2>/dev/null || curl -s -o /dev/null -w '%{http_code}' http://localhost/api/v1/products 2>/dev/null || echo 000",
+                        script: "curl -sk -o /dev/null -w '%{http_code}' https://${DOMAIN}/api/v1/products 2>/dev/null || echo 000",
                         returnStdout: true
                     ).trim()
+
                     echo "Health Check: HTTP ${status}"
+
                     if (status == '200') {
                         echo "✅ DEPLOY THANH CONG: https://${DOMAIN}"
                     } else {
@@ -149,14 +157,14 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker image prune -f || true"
+                sh "docker image prune -f || true" // dọn image rác
             }
         }
     }
 
     post {
         success {
-            echo "✅ Build #${BUILD_NUMBER} OK → https://nuocngavidai.duckdns.org"
+            echo "✅ Build #${BUILD_NUMBER} OK → https://${DOMAIN}"
         }
         failure {
             sh "docker compose logs --tail=30 || true"
