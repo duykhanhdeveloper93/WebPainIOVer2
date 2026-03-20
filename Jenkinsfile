@@ -102,12 +102,14 @@ pipeline {
         stage('Seed DB') {
             steps {
                 sh """
+                    cd ${APP_DIR}
+
                     if [ ! -f "${APP_DIR}/.seeded" ]; then
                         echo "Seeding database..."
-                        sleep 25
+                        sleep 10
                         docker compose \
-                          --env-file ${APP_DIR}/.env.production \
-                          exec -T backend node dist/database/seed.js
+                        --env-file ${APP_DIR}/.env.production \
+                        exec -T backend node dist/database/seed.js
                         touch ${APP_DIR}/.seeded
                         echo "Seed OK"
                     else

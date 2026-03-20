@@ -1,0 +1,99 @@
+# =========================
+# STEP 1: DEFINE SERVICES
+# =========================
+services:
+
+  # =========================
+  # STEP 2: MYSQL
+  # =========================
+  mysql:
+    image: mysql:8.0
+    container_name: paintco_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass2024
+      MYSQL_DATABASE: paintco_db
+      MYSQL_USER: paintco
+      MYSQL_PASSWORD: paintco123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    networks:
+      - paintco_net
+
+  # =========================
+  # STEP 3: BACKEND (NODE)
+  # =========================
+  backend:
+    build:
+      context: ./backend
+    container_name: paintco_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: paintco
+      DB_PASSWORD: paintco123
+      DB_DATABASE: paintco_db
+      JWT_SECRET: change-me
+      FRONTEND_URL: https://nuocngavidai.duckdns.org
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      - mysql
+    networks:
+      - paintco_net
+
+  # =========================
+  # STEP 4: FRONTEND
+  # =========================
+  frontend:
+    build:
+      context: ./frontend
+    container_name: paintco_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - paintco_net
+
+  # =========================
+  # STEP 5: CADDY (AUTO SSL)
+  # =========================
+  caddy:
+    image: caddy:2-alpine
+    container_name: paintco_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"    # HTTP (cần cho Let's Encrypt)
+      - "443:443"  # HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile   # config chính
+      - caddy_data:/data                  # chứa SSL cert
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - paintco_net
+
+# =========================
+# STEP 6: VOLUMES
+# =========================
+volumes:
+  mysql_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:
+
+# =========================
+# STEP 7: NETWORK
+# =========================
+networks:
+  paintco_net:
+    driver: bridge
