@@ -2,38 +2,54 @@ pipeline {
     agent any
 
     environment {
-        APP_DIR    = '/opt/paintco' // thư mục deploy trên server
-        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git' // repo chuẩn
-        GIT_BRANCH = 'develop' // branch cần deploy
-        DOMAIN     = 'nuocngavidai.duckdns.org' // domain để health check
+        APP_DIR    = '/opt/paintco'
+        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git'
+        GIT_BRANCH = 'develop'
+        DOMAIN     = 'nuocngavidai.duckdns.org'
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '5')) // giữ 5 build gần nhất
-        timeout(time: 40, unit: 'MINUTES') // timeout toàn pipeline
-        disableConcurrentBuilds() // không cho chạy song song
-        timestamps() // log có timestamp
-        skipDefaultCheckout(true) // 🚨 QUAN TRỌNG: tắt checkout tự động của Jenkins
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        timeout(time: 40, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        timestamps()
+        skipDefaultCheckout(true)
     }
 
     triggers {
-        githubPush() // trigger khi push github
+        githubPush()
     }
 
     stages {
 
-        stage('Pull Code (Clean Clone)') {
+        stage('Pull Code (Smart Update)') {
             steps {
                 sh """
-                    echo ">>> XOA CODE CU"
-                    rm -rf ${APP_DIR}   # 💀 xóa sạch thư mục cũ (tránh dính repo cũ)
+                    echo ">>> CHECK REPO"
 
-                    echo ">>> CLONE REPO MOI"
-                    git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}  # 📥 clone fresh 100%
+                    # Nếu chưa có repo → clone
+                    if [ ! -d "${APP_DIR}/.git" ]; then
+                        echo ">>> CLONE LAN DAU"
+                        mkdir -p ${APP_DIR}
+                        git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}
+                    else
+                        echo ">>> UPDATE CODE"
+                        cd ${APP_DIR}
+
+                        # reset sạch về repo
+                        git fetch origin ${GIT_BRANCH}
+                        git reset --hard origin/${GIT_BRANCH}
+
+                        # xóa file rác (NHƯNG giữ .env và uploads)
+                        git clean -fd \
+                          -e .env.production \
+                          -e uploads \
+                          -e node_modules
+                    fi
 
                     cd ${APP_DIR}
                     echo ">>> COMMIT HIEN TAI"
-                    git log -1 --oneline  # in commit đang deploy
+                    git log -1 --oneline
                 """
             }
         }
@@ -43,7 +59,6 @@ pipeline {
                 sh """
                     cd ${APP_DIR}
 
-                    # nếu chưa có file env thì copy từ example
                     if [ ! -f ".env.production" ]; then
                         cp .env.production.example .env.production
                         echo "WARN: Tao .env.production tu example - can kiem tra lai!"
@@ -62,7 +77,6 @@ pipeline {
                         sh """
                             cd ${APP_DIR}
 
-                            # build image backend
                             docker build \
                               -t paintco-backend:${BUILD_NUMBER} \
                               -t paintco-backend:latest \
@@ -77,7 +91,6 @@ pipeline {
                         sh """
                             cd ${APP_DIR}
 
-                            # build image frontend (có nginx trong Dockerfile - OK)
                             docker build \
                               -t paintco-frontend:${BUILD_NUMBER} \
                               -t paintco-frontend:latest \
@@ -97,7 +110,6 @@ pipeline {
 
                     echo ">>> START DOCKER COMPOSE"
 
-                    # chạy docker compose (dùng file trong repo mới clone)
                     docker compose \
                       --env-file .env.production \
                       up -d --build --remove-orphans
@@ -113,14 +125,13 @@ pipeline {
                 sh """
                     cd ${APP_DIR}
 
-                    # chỉ seed 1 lần
                     if [ ! -f ".seeded" ]; then
                         echo "Seeding database..."
                         sleep 10
 
                         docker compose \
-                        --env-file .env.production \
-                        exec -T backend node dist/database/seed.js
+                          --env-file .env.production \
+                          exec -T backend node dist/database/seed.js
 
                         touch .seeded
                         echo "Seed OK"
@@ -130,9 +141,6 @@ pipeline {
                 """
             }
         }
-
-        // ❌ ĐÃ XÓA NGINX RELOAD (vì dùng Caddy)
-        // tránh lỗi container nginx không tồn tại
 
         stage('Health Check') {
             steps {
@@ -150,6 +158,7 @@ pipeline {
                         echo "✅ DEPLOY THANH CONG: https://${DOMAIN}"
                     } else {
                         sh "docker compose logs --tail=20 backend || true"
+                        error("Health check failed")
                     }
                 }
             }
@@ -157,7 +166,7 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker image prune -f || true" // dọn image rác
+                sh "docker image prune -f || true"
             }
         }
     }
