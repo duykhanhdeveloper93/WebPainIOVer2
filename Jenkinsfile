@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    triggers {
+        githubPush()
+    }
+    
     environment {
         DOMAIN = 'nuocngavidai.duckdns.org'
     }
