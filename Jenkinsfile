@@ -2,104 +2,35 @@ pipeline {
     agent any
 
     environment {
-        APP_DIR    = '/opt/paintco'
-        GIT_REPO   = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git'
+        APP_DIR = '/opt/paintco'
+        GIT_REPO = 'https://github.com/duykhanhdeveloper93/WebPainIOVer2.git'
         GIT_BRANCH = 'develop'
-        DOMAIN     = 'nuocngavidai.duckdns.org'
-    }
-
-    options {
-        buildDiscarder(logRotator(numToKeepStr: '5'))
-        timeout(time: 40, unit: 'MINUTES')
-        disableConcurrentBuilds()
-        timestamps()
-        skipDefaultCheckout(true)
-    }
-
-    triggers {
-        githubPush()
+        DOMAIN = 'nuocngavidai.duckdns.org'
     }
 
     stages {
 
-        stage('Pull Code (Smart Update)') {
+        stage('Pull Code') {
             steps {
                 sh """
-                    echo ">>> CHECK REPO"
-
-                    # Nếu chưa có repo → clone
                     if [ ! -d "${APP_DIR}/.git" ]; then
-                        echo ">>> CLONE LAN DAU"
-                        mkdir -p ${APP_DIR}
                         git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}
                     else
-                        echo ">>> UPDATE CODE"
                         cd ${APP_DIR}
-
-                        # reset sạch về repo
                         git fetch origin ${GIT_BRANCH}
                         git reset --hard origin/${GIT_BRANCH}
-
-                        # xóa file rác (NHƯNG giữ .env và uploads)
-                        git clean -fd \
-                          -e .env.production \
-                          -e uploads \
-                          -e node_modules
                     fi
-
-                    cd ${APP_DIR}
-                    echo ">>> COMMIT HIEN TAI"
-                    git log -1 --oneline
                 """
             }
         }
 
-        stage('Check .env') {
+        stage('Build') {
             steps {
                 sh """
                     cd ${APP_DIR}
-
-                    if [ ! -f ".env.production" ]; then
-                        cp .env.production.example .env.production
-                        echo "WARN: Tao .env.production tu example - can kiem tra lai!"
-                    fi
-
-                    echo "ENV: OK"
+                    docker build -t paintco-backend ./backend
+                    docker build -t paintco-frontend ./frontend
                 """
-            }
-        }
-
-        stage('Build Images') {
-            parallel {
-
-                stage('Backend') {
-                    steps {
-                        sh """
-                            cd ${APP_DIR}
-
-                            docker build \
-                              -t paintco-backend:${BUILD_NUMBER} \
-                              -t paintco-backend:latest \
-                              --cache-from paintco-backend:latest \
-                              ./backend/
-                        """
-                    }
-                }
-
-                stage('Frontend') {
-                    steps {
-                        sh """
-                            cd ${APP_DIR}
-
-                            docker build \
-                              -t paintco-frontend:${BUILD_NUMBER} \
-                              -t paintco-frontend:latest \
-                              --cache-from paintco-frontend:latest \
-                              ./frontend/
-                        """
-                    }
-                }
-
             }
         }
 
@@ -107,15 +38,28 @@ pipeline {
             steps {
                 sh """
                     cd ${APP_DIR}
+                    docker compose up -d --build --remove-orphans
+                """
+            }
+        }
 
-                    echo ">>> START DOCKER COMPOSE"
+        stage('Fix DB') {
+            steps {
+                sh """
+                    docker exec -i paintco_mysql mysql -uroot -prootpass2024 <<EOF
+                    ALTER USER 'paintco'@'%' IDENTIFIED BY 'paintco123';
+                    FLUSH PRIVILEGES;
+EOF
+                """
+            }
+        }
 
-                    docker compose \
-                      --env-file .env.production \
-                      up -d --build --remove-orphans
-
-                    echo ">>> CONTAINERS STATUS"
-                    docker compose ps
+        stage('Init SSL') {
+            steps {
+                sh """
+                    cd ${APP_DIR}
+                    docker compose run --rm init-cert || true
+                    docker exec paintco_nginx nginx -s reload || true
                 """
             }
         }
@@ -126,17 +70,15 @@ pipeline {
                     cd ${APP_DIR}
 
                     if [ ! -f ".seeded" ]; then
-                        echo "Seeding database..."
                         sleep 10
+                        docker compose exec -T backend node dist/database/seed.js
 
-                        docker compose \
-                          --env-file .env.production \
-                          exec -T backend node dist/database/seed.js
+                        if [ $? -ne 0 ]; then
+                            echo "Seed FAILED"
+                            exit 1
+                        fi
 
                         touch .seeded
-                        echo "Seed OK"
-                    else
-                        echo "Da seed roi, bo qua"
                     fi
                 """
             }
@@ -146,38 +88,17 @@ pipeline {
             steps {
                 script {
                     sleep(10)
-
                     def status = sh(
-                        script: "curl -sk -o /dev/null -w '%{http_code}' https://${DOMAIN}/api/v1/products 2>/dev/null || echo 000",
+                        script: "curl -sk -o /dev/null -w '%{http_code}' https://${DOMAIN}/api/v1/products || echo 000",
                         returnStdout: true
                     ).trim()
 
-                    echo "Health Check: HTTP ${status}"
-
-                    if (status == '200') {
-                        echo "✅ DEPLOY THANH CONG: https://${DOMAIN}"
-                    } else {
+                    if (status != '200') {
                         sh "docker compose logs --tail=20 backend || true"
-                        error("Health check failed")
+                        error("Deploy failed")
                     }
                 }
             }
-        }
-
-        stage('Cleanup') {
-            steps {
-                sh "docker image prune -f || true"
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ Build #${BUILD_NUMBER} OK → https://${DOMAIN}"
-        }
-        failure {
-            sh "docker compose logs --tail=30 || true"
-            echo "❌ Build #${BUILD_NUMBER} FAILED"
         }
     }
 }

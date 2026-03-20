@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
 
   mysql:
@@ -7,10 +5,10 @@ services:
     container_name: paintco_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass2024}
-      MYSQL_DATABASE: ${DB_DATABASE:-paintco_db}
-      MYSQL_USER: ${DB_USERNAME:-paintco}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-paintco123}
+      MYSQL_ROOT_PASSWORD: rootpass2024
+      MYSQL_DATABASE: paintco_db
+      MYSQL_USER: paintco
+      MYSQL_PASSWORD: paintco123
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -18,7 +16,7 @@ services:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "paintco", "--password=${DB_PASSWORD:-paintco123}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "paintco", "--password=paintco123"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -28,7 +26,6 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     container_name: paintco_backend
     restart: unless-stopped
     environment:
@@ -36,11 +33,11 @@ services:
       PORT: 3000
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USERNAME: ${DB_USERNAME:-paintco}
-      DB_PASSWORD: ${DB_PASSWORD:-paintco123}
-      DB_DATABASE: ${DB_DATABASE:-paintco_db}
-      JWT_SECRET: ${JWT_SECRET:-change-me}
-      JWT_EXPIRES: ${JWT_EXPIRES:-7d}
+      DB_USERNAME: paintco
+      DB_PASSWORD: paintco123
+      DB_DATABASE: paintco_db
+      JWT_SECRET: change-me
+      JWT_EXPIRES: 7d
       FRONTEND_URL: https://nuocngavidai.duckdns.org
     volumes:
       - uploads_data:/app/uploads
@@ -53,7 +50,6 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
     container_name: paintco_frontend
     restart: unless-stopped
     depends_on:
@@ -72,28 +68,35 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - certbot_www:/var/www/certbot:ro
       - certbot_certs:/etc/letsencrypt:ro
-      - nginx_logs:/var/log/nginx
     depends_on:
       - backend
       - frontend
     networks:
       - paintco_net
 
-  # 👉 chạy 1 lần để tạo SSL
+  # 👉 INIT SSL (chạy 1 lần trong pipeline)
   init-cert:
     image: certbot/certbot:latest
     container_name: paintco_init_cert
     volumes:
       - certbot_www:/var/www/certbot
       - certbot_certs:/etc/letsencrypt
-      - ./init-letsencrypt.sh:/init-letsencrypt.sh
-    entrypoint: "/bin/sh /init-letsencrypt.sh"
+    entrypoint: >
+      /bin/sh -c "
+      echo '>>> INIT SSL';
+      certbot certonly --webroot -w /var/www/certbot \
+      -d nuocngavidai.duckdns.org \
+      --email mày@gmail.com \
+      --agree-tos --no-eff-email \
+      --non-interactive || true;
+      echo '>>> DONE SSL';
+      "
     depends_on:
       - nginx
     networks:
       - paintco_net
 
-  # 👉 auto renew SSL
+  # 👉 AUTO RENEW SSL
   certbot:
     image: certbot/certbot:latest
     container_name: paintco_certbot
@@ -116,7 +119,6 @@ volumes:
   uploads_data:
   certbot_www:
   certbot_certs:
-  nginx_logs:
 
 networks:
   paintco_net:
