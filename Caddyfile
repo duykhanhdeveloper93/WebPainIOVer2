@@ -7,17 +7,17 @@ nuocngavidai.duckdns.org {
         respond "OK" 200
     }
 
-    # API
+    # API (strip /api -> đúng vì backend đã có /api)
     handle_path /api/* {
         reverse_proxy backend:3000
     }
 
-    # Socket / WebRTC
-    handle_path /socket.io/* {
+    # Socket (KHÔNG strip path)
+    handle /socket.io/* {
         reverse_proxy backend:3000
     }
 
-    # Static frontend
+    # Frontend
     handle {
         reverse_proxy frontend:80
     }
