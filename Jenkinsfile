@@ -12,62 +12,62 @@ pipeline {
 
         stage('Pull Code') {
             steps {
-                sh """
-                    if [ ! -d "${APP_DIR}/.git" ]; then
-                        git clone -b ${GIT_BRANCH} ${GIT_REPO} ${APP_DIR}
+                sh '''
+                    if [ ! -d "$APP_DIR/.git" ]; then
+                        git clone -b $GIT_BRANCH $GIT_REPO $APP_DIR
                     else
-                        cd ${APP_DIR}
-                        git fetch origin ${GIT_BRANCH}
-                        git reset --hard origin/${GIT_BRANCH}
+                        cd $APP_DIR
+                        git fetch origin $GIT_BRANCH
+                        git reset --hard origin/$GIT_BRANCH
                     fi
-                """
+                '''
             }
         }
 
         stage('Build') {
             steps {
-                sh """
-                    cd ${APP_DIR}
+                sh '''
+                    cd $APP_DIR
                     docker build -t paintco-backend ./backend
                     docker build -t paintco-frontend ./frontend
-                """
+                '''
             }
         }
 
         stage('Deploy') {
             steps {
-                sh """
-                    cd ${APP_DIR}
+                sh '''
+                    cd $APP_DIR
                     docker compose up -d --build --remove-orphans
-                """
+                '''
             }
         }
 
         stage('Fix DB') {
             steps {
-                sh """
+                sh '''
                     docker exec -i paintco_mysql mysql -uroot -prootpass2024 <<EOF
                     ALTER USER 'paintco'@'%' IDENTIFIED BY 'paintco123';
                     FLUSH PRIVILEGES;
 EOF
-                """
+                '''
             }
         }
 
         stage('Init SSL') {
             steps {
-                sh """
-                    cd ${APP_DIR}
+                sh '''
+                    cd $APP_DIR
                     docker compose run --rm init-cert || true
                     docker exec paintco_nginx nginx -s reload || true
-                """
+                '''
             }
         }
 
         stage('Seed DB') {
             steps {
-                sh """
-                    cd ${APP_DIR}
+                sh '''
+                    cd $APP_DIR
 
                     if [ ! -f ".seeded" ]; then
                         sleep 10
@@ -80,7 +80,7 @@ EOF
 
                         touch .seeded
                     fi
-                """
+                '''
             }
         }
 
