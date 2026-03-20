@@ -4,33 +4,17 @@ pipeline {
     triggers {
         githubPush()
     }
-    
-    environment {
-        DOMAIN = 'nuocngavidai.duckdns.org'
-    }
 
     stages {
 
-        //------------- Checkout
-        stage('Pull Code') {
+        stage('Checkout') {
             steps {
                 checkout scm
                 sh 'git log -1 --oneline'
             }
         }
 
-        //------------- Build
-        stage('Build') {
-            steps {
-                sh '''
-                    docker build -t paintco-backend ./backend
-                    docker build -t paintco-frontend ./frontend
-                '''
-            }
-        }
-
-        //------------- Deploy
-        stage('Deploy') {
+        stage('Build & Deploy') {
             steps {
                 sh '''
                     docker compose down --remove-orphans || true
@@ -40,57 +24,14 @@ pipeline {
             }
         }
 
-        //------------- Fix DB (SAFE VERSION)
-        stage('Fix DB') {
-            steps {
-                sh '''
-                    echo "Check DB connection..."
-                    docker compose exec -T backend node -e "
-                        const mysql = require('mysql2/promise');
-                        (async () => {
-                            try {
-                                const conn = await mysql.createConnection({
-                                    host: 'mysql',
-                                    user: 'paintco',
-                                    password: 'paintco123',
-                                    database: 'paintco_db'
-                                });
-                                console.log('DB OK');
-                                await conn.end();
-                            } catch (e) {
-                                console.error('DB FAIL', e.message);
-                                process.exit(1);
-                            }
-                        })();
-                    "
-                '''
-            }
-        }
-
-        //------------- Init SSL
-        stage('Init SSL') {
-            steps {
-                sh '''
-                    docker compose run --rm init-cert || true
-                    docker compose exec -T nginx nginx -s reload || true
-                '''
-            }
-        }
-
-        //------------- Seed DB
         stage('Seed DB') {
             steps {
                 sh '''
                     if [ ! -f ".seeded" ]; then
-                        echo "Seeding..."
+                        echo "Seeding DB..."
                         sleep 10
 
-                        docker compose exec -T backend node dist/database/seed.js
-
-                        if [ $? -ne 0 ]; then
-                            echo "Seed FAILED"
-                            exit 1
-                        fi
+                        docker compose exec -T backend node dist/database/seed.js || exit 1
 
                         touch .seeded
                     else
@@ -100,14 +41,13 @@ pipeline {
             }
         }
 
-        //------------- Health Check
         stage('Health Check') {
             steps {
                 script {
                     sleep(10)
 
                     def status = sh(
-                        script: "curl -sk -o /dev/null -w '%{http_code}' https://${DOMAIN}/api/v1/products || echo 000",
+                        script: "curl -sk -o /dev/null -w '%{http_code}' https://nuocngavidai.duckdns.org/api/v1/products || echo 000",
                         returnStdout: true
                     ).trim()
 

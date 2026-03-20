@@ -1,0 +1,24 @@
+nuocngavidai.duckdns.org {
+
+    encode gzip
+
+    # Health check
+    handle /health {
+        respond "OK" 200
+    }
+
+    # API
+    handle_path /api/* {
+        reverse_proxy backend:3000
+    }
+
+    # Socket / WebRTC
+    handle_path /socket.io/* {
+        reverse_proxy backend:3000
+    }
+
+    # Static frontend
+    handle {
+        reverse_proxy frontend:80
+    }
+}

@@ -1,5 +1,8 @@
+version: '3.9'
+
 services:
 
+  # ================= MYSQL =================
   mysql:
     image: mysql:8.0
     container_name: paintco_mysql
@@ -23,6 +26,7 @@ services:
     networks:
       - paintco_net
 
+  # ================= BACKEND =================
   backend:
     build:
       context: ./backend
@@ -37,7 +41,6 @@ services:
       DB_PASSWORD: paintco123
       DB_DATABASE: paintco_db
       JWT_SECRET: change-me
-      JWT_EXPIRES: 7d
       FRONTEND_URL: https://nuocngavidai.duckdns.org
     volumes:
       - uploads_data:/app/uploads
@@ -47,6 +50,7 @@ services:
     networks:
       - paintco_net
 
+  # ================= FRONTEND =================
   frontend:
     build:
       context: ./frontend
@@ -57,67 +61,29 @@ services:
     networks:
       - paintco_net
 
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: paintco_nginx
-    restart: always
+  # ================= CADDY (AUTO SSL) =================
+  caddy:
+    image: caddy:2-alpine
+    container_name: paintco_caddy
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - certbot_www:/var/www/certbot:ro
-      - certbot_certs:/etc/letsencrypt:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       - backend
       - frontend
     networks:
       - paintco_net
 
-  # 👉 CHẠY 1 LẦN (SSL INIT)
-  init-cert:
-    image: certbot/certbot:latest
-    volumes:
-      - certbot_www:/var/www/certbot
-      - certbot_certs:/etc/letsencrypt
-    entrypoint: >
-      /bin/sh -c "
-      echo '>>> INIT SSL';
-      certbot certonly --webroot -w /var/www/certbot \
-      -d nuocngavidai.duckdns.org \
-      --email duykhanhdeveloper93@gmail.com \
-      --agree-tos --no-eff-email \
-      --non-interactive || true;
-      echo '>>> DONE SSL';
-      "
-    depends_on:
-      - nginx
-    networks:
-      - paintco_net
-
-  # 👉 AUTO RENEW SSL
-  certbot:
-    image: certbot/certbot:latest
-    container_name: paintco_certbot
-    restart: unless-stopped
-    volumes:
-      - certbot_www:/var/www/certbot:rw
-      - certbot_certs:/etc/letsencrypt:rw
-    entrypoint: >
-      /bin/sh -c "
-      while true; do
-        echo '>>> Renew SSL';
-        certbot renew --webroot -w /var/www/certbot;
-        sleep 12h;
-      done"
-    networks:
-      - paintco_net
-
 volumes:
   mysql_data:
   uploads_data:
-  certbot_www:
-  certbot_certs:
+  caddy_data:
+  caddy_config:
 
 networks:
   paintco_net:
