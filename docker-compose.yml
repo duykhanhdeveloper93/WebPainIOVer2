@@ -1,35 +1,34 @@
-# =========================
-# STEP 1: DEFINE SERVICES
-# =========================
+version: '3.9'
+
 services:
 
-  # =========================
-  # STEP 2: MYSQL
-  # =========================
   mysql:
     image: mysql:8.0
     container_name: paintco_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass2024
-      MYSQL_DATABASE: paintco_db
-      MYSQL_USER: paintco
-      MYSQL_PASSWORD: paintco123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass2024}
+      MYSQL_DATABASE: ${DB_DATABASE:-paintco_db}
+      MYSQL_USER: ${DB_USERNAME:-paintco}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-paintco123}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "paintco", "--password=${DB_PASSWORD:-paintco123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - paintco_net
 
-  # =========================
-  # STEP 3: BACKEND (NODE)
-  # =========================
   backend:
     build:
       context: ./backend
+      dockerfile: Dockerfile
     container_name: paintco_backend
     restart: unless-stopped
     environment:
@@ -37,24 +36,24 @@ services:
       PORT: 3000
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USERNAME: paintco
-      DB_PASSWORD: paintco123
-      DB_DATABASE: paintco_db
-      JWT_SECRET: change-me
+      DB_USERNAME: ${DB_USERNAME:-paintco}
+      DB_PASSWORD: ${DB_PASSWORD:-paintco123}
+      DB_DATABASE: ${DB_DATABASE:-paintco_db}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_EXPIRES: ${JWT_EXPIRES:-7d}
       FRONTEND_URL: https://nuocngavidai.duckdns.org
     volumes:
       - uploads_data:/app/uploads
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - paintco_net
 
-  # =========================
-  # STEP 4: FRONTEND
-  # =========================
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
     container_name: paintco_frontend
     restart: unless-stopped
     depends_on:
@@ -62,38 +61,63 @@ services:
     networks:
       - paintco_net
 
-  # =========================
-  # STEP 5: CADDY (AUTO SSL)
-  # =========================
-  caddy:
-    image: caddy:2-alpine
-    container_name: paintco_caddy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: paintco_nginx
     restart: unless-stopped
     ports:
-      - "80:80"    # HTTP (cần cho Let's Encrypt)
-      - "443:443"  # HTTPS
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile   # config chính
-      - caddy_data:/data                  # chứa SSL cert
-      - caddy_config:/config
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - nginx_logs:/var/log/nginx
     depends_on:
       - backend
       - frontend
     networks:
       - paintco_net
 
-# =========================
-# STEP 6: VOLUMES
-# =========================
+  # 👉 chạy 1 lần để tạo SSL
+  init-cert:
+    image: certbot/certbot:latest
+    container_name: paintco_init_cert
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+      - ./init-letsencrypt.sh:/init-letsencrypt.sh
+    entrypoint: "/bin/sh /init-letsencrypt.sh"
+    depends_on:
+      - nginx
+    networks:
+      - paintco_net
+
+  # 👉 auto renew SSL
+  certbot:
+    image: certbot/certbot:latest
+    container_name: paintco_certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_www:/var/www/certbot:rw
+      - certbot_certs:/etc/letsencrypt:rw
+    entrypoint: >
+      /bin/sh -c "
+      trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot;
+        sleep 12h & wait $${!};
+      done"
+    networks:
+      - paintco_net
+
 volumes:
   mysql_data:
   uploads_data:
-  caddy_data:
-  caddy_config:
+  certbot_www:
+  certbot_certs:
+  nginx_logs:
 
-# =========================
-# STEP 7: NETWORK
-# =========================
 networks:
   paintco_net:
     driver: bridge
