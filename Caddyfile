@@ -2,17 +2,16 @@ nuocngavidai.duckdns.org {
 
     encode gzip
 
-    # Health check
     handle /health {
         respond "OK" 200
     }
 
-    # API (strip /api -> đúng vì backend đã có /api)
-    handle_path /api/* {
+    # API (KHÔNG strip path)
+    handle /api/* {
         reverse_proxy backend:3000
     }
 
-    # Socket (KHÔNG strip path)
+    # Socket
     handle /socket.io/* {
         reverse_proxy backend:3000
     }
