@@ -7,7 +7,7 @@ dist/
 .angular/
 
 # Env
-.env
+# .env tạm thời bỏ nhé
 *.env.local
 
 # OS
